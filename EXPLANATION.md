@@ -417,3 +417,117 @@ spec:
         9NEVgJRdZ5x9S5gcJzINrv+R5qLPNV2C3BUjS7PSY0lEsz/bjY//T7x4iQ==
         -----END PUBLIC KEY-----
 ```
+
+---
+
+## PHẦN E: GIẢI THÍCH CHI TIẾT CHALLENGE (MULTI-TENANT ONBOARDING)
+
+### 1. Ý tưởng cốt lõi của Challenge
+Mục tiêu của bài tập lớn này là chào đón thêm một **Team B (payments)** vào sử dụng chung cụm K8s với **Team A (demo)**, nhưng phải đảm bảo:
+- **Cô lập an toàn (Isolation)**: Hai team ở hai ngăn tủ (Namespace) riêng biệt. Không team nào được can thiệp vào tài nguyên của team kia.
+- **Cách ly mạng (Network Policy)**: Pod của Team B không được phép gọi trực tiếp sang dịch vụ của Team A để tránh lộ thông tin nội bộ.
+- **Quản lý tài nguyên (Quota & LimitRange)**: Giới hạn ngân sách phần cứng (RAM/CPU) của Team B để không làm nghẽn cụm, đồng thời cấu hình mặc định tự động cấp limits cho Pod thiếu cấu hình.
+- **Kế thừa Guardrail**: Các luật bảo mật cũ (Gatekeeper chặn root, chặn `:latest` tag, và Sigstore xác thực chữ ký ảnh) phải **tự động áp dụng** cho namespace của Team B mà không cần phải viết thêm luật hay copy-paste cấu hình mới.
+
+---
+
+### 2. Chi tiết cấu hình hạ tầng Tenant (`tenants/payments/`)
+
+#### A. Khởi tạo Namespace (`tenants/payments/ns.yaml`)
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    kubernetes.io/metadata.name: payments
+    policy.sigstore.dev/include: "true"    # KÍCH HOẠT: Tự động chạy Sigstore verify image cho namespace này
+```
+- **Giải thích**: Ngoài việc tạo ngăn tủ tên `payments`, nhãn `policy.sigstore.dev/include: "true"` chính là chìa khóa. Nó thông báo cho webhook của Sigstore biết rằng: *"Hãy quét và xác thực chữ ký số cho mọi Pod được tạo ra tại đây"*. Đây chính là cách guardrail cũ **tự động áp dụng** cho team mới mà không cần sửa luật gốc.
+
+#### B. Phân quyền tối giản RBAC (`tenants/payments/rbac.yaml`)
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: payments-dev-role
+  namespace: payments
+rules:
+- apiGroups: ["", "apps", "networking.k8s.io"]
+  resources: ["pods", "pods/log", "pods/exec", "services", "deployments", "replicasets", "statefulsets", "daemonsets", "ingresses"]
+  verbs: ["*"]                          # Toàn quyền CRUD trên các tài nguyên workload
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: payments-dev-rolebinding
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: payments-dev-role
+subjects:
+- kind: User
+  name: payments-dev
+  apiGroup: rbac.authorization.k8s.io
+```
+- **Giải thích**:
+  - Chúng ta sử dụng `Role` và `RoleBinding` thay vì `ClusterRoleBinding` để bó cứng quyền của `payments-dev` trong phạm vi namespace `payments`.
+  - Trong phần `resources`, chúng ta liệt kê rõ ràng các tài nguyên workload chính (deployments, pods, services, ingresses) nhưng **hoàn toàn loại bỏ `secrets` và `rolebindings` / `roles`**.
+  - Kết quả: `payments-dev` có thể thoải mái deploy app trong phòng của mình, nhưng không thể xem trộm mật khẩu (secret) và không thể tự leo thang đặc quyền bằng cách sửa Role hoặc RoleBinding.
+
+#### C. Định mức tài nguyên & Mặc định Limits (`quota.yaml` & `limitrange.yaml`)
+- **ResourceQuota**: Đặt ra trần tối đa.
+  ```yaml
+  spec:
+    hard:
+      requests.cpu: "200m"
+      requests.memory: "128Mi"
+      limits.cpu: "500m"
+      limits.memory: "256Mi"
+  ```
+  Nếu ai đó cố tình deploy pod yêu cầu vượt quá định mức này (ví dụ: xin 512Mi RAM), API Server sẽ từ chối tạo pod đó ngay lập tức để bảo vệ tài nguyên vật lý của cụm.
+- **LimitRange**: Đóng vai trò là phao cứu sinh cho Pod lười biếng.
+  ```yaml
+  spec:
+    limits:
+    - default:
+        cpu: "100m"
+        memory: "64Mi"
+      defaultRequest:
+        cpu: "50m"
+        memory: "32Mi"
+      type: Container
+  ```
+  Nếu Pod không khai báo `resources.limits` trong file YAML, bộ lọc Mutating Admission của LimitRange sẽ tự động điền các giá trị mặc định này vào Pod *trước* khi Gatekeeper kiểm duyệt. Nhờ đó, Pod đó sẽ không bị luật `require-resource-limits` của Gatekeeper chặn lại!
+
+#### D. Cách ly mạng bằng NetworkPolicy (`tenants/payments/netpol.yaml`)
+Chúng ta áp dụng 2 chính sách mạng:
+1.  **Chặn Ingress (deny-all-ingress)**: Mặc định không cho phép bất kỳ dịch vụ hay namespace nào từ bên ngoài gọi trực tiếp vào các Pod trong `payments`.
+2.  **Chặn Egress (allow-same-ns-egress-and-dns)**:
+    - Chỉ cho phép các Pod trong `payments` gọi ra ngoài đến chính các Pod trong cùng namespace `payments` (phục vụ giao tiếp nội bộ).
+    - Chỉ cho phép gửi yêu cầu truy vấn tên miền (DNS queries) cổng 53 đến namespace hệ thống `kube-system`.
+    - **Kết quả**: Do không khai báo quyền truy cập đến namespace `demo`, mọi nỗ lực kết nối từ Pod của `payments` sang service `api` của `demo` đều bị chặn đứng và gây lỗi timeout.
+
+---
+
+### 3. GitOps và Kế thừa Guardrail qua ArgoCD
+
+#### A. Hai ứng dụng ArgoCD mới
+Chúng ta khai báo thêm 2 manifest trong `argocd/apps/` để ArgoCD quản lý GitOps:
+- `payments.yaml`: Deploy toàn bộ hạ tầng (ns, rbac, quota, netpol) với sync-wave sớm `"-1"`.
+- `payments-app.yaml`: Deploy ứng dụng Team B với sync-wave `"0"`.
+
+#### B. Cơ chế tự động áp dụng chính sách bảo mật cũ
+1.  **OPA Gatekeeper**:
+    Tại các Constraint cũ (ví dụ: `k8sblockrootuser-constraint.yaml`), chúng ta chỉ cần thêm `- payments` vào danh sách `spec.match.namespaces`:
+    ```yaml
+      match:
+        namespaces:
+          - demo
+          - payments
+    ```
+    Như vậy, Gatekeeper tự động quét và chặn các hành vi nguy hiểm (chạy root, tag latest, replicas > 5) trong namespace mới mà không cần viết lại bất kỳ logic Rego nào.
+2.  **Sigstore Policy Controller**:
+    Vì ClusterImagePolicy áp dụng ở mức toàn cụm (Cluster-scoped) cho các ảnh khớp glob `ghcr.io/ptienhocse/w10-api*`, khi namespace `payments` có nhãn `policy.sigstore.dev/include=true`, Sigstore tự động quét chữ ký số cho ảnh của Team B. Nhờ đó, ảnh đã ký hợp lệ thì chạy xanh, còn ảnh chưa ký (như `nginx:1.25`) sẽ bị chặn admission ngay lập tức.
+
