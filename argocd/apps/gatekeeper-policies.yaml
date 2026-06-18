@@ -1,20 +1,25 @@
-# Lab 5: app-of-apps root
-# Root App: App of Apps pattern - quản lý tất cả child applications
+# ArgoCD App: Deploy Gatekeeper Policies (ConstraintTemplates & Constraints)
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: root
+  name: gatekeeper-policies
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   project: default
   source:
     repoURL: https://github.com/PTienhocSE/security-aws.git
-    path: argocd/apps
+    path: gatekeeper
     targetRevision: main
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: default
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+    - ServerSideApply=true

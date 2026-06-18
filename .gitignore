@@ -10,3 +10,11 @@ k8s-monitoring/alertmanager-config.yaml
 
 # OS
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.zip
+*.pem
+*.tfvars

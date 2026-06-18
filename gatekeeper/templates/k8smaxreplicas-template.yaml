@@ -1,0 +1,28 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8smaxreplicas
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sMaxReplicas
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            max:
+              type: integer
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8smaxreplicas
+
+        violation[{"msg": msg}] {
+          replicas := input.review.object.spec.replicas
+          max_allowed := input.parameters.max
+          replicas > max_allowed
+          msg := sprintf("Workload replicas count %v exceeds the maximum allowed replica count of %v", [replicas, max_allowed])
+        }
