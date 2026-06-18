@@ -205,3 +205,22 @@ kubectl delete ns argocd
 minikube stop -p w10
 minikube delete -p w10
 ```
+
+## Multi-Tenant Challenge: Onboard Team Payments (Cô lập an toàn)
+
+### 1. Vì sao các guardrail bảo mật cũ tự động áp dụng cho namespace/team mới (`payments`) mà không cần viết lại luật mới?
+
+- **Sigstore Policy-Controller (Supply Chain)**: ClusterImagePolicy (`image-signature-policy`) được cấu hình ở mức Cluster. Webhook của Sigstore được thiết lập để tự động kiểm duyệt tất cả các namespace có gắn label `policy.sigstore.dev/include=true`. Khi onboard team `payments`, chúng ta chỉ cần gắn label này vào namespace `payments` trong file [ns.yaml](file:///D:/Workspace/Study/AWS/aws-sercurity/tenants/payments/ns.yaml). Hệ thống sẽ tự động bắt đầu quét chữ ký số cho mọi Pod triển khai trong namespace này mà không cần sửa đổi hay viết thêm bất kỳ chính sách (ClusterImagePolicy) nào.
+- **OPA Gatekeeper (Admission Control)**: Các Constraint (luật chặn) như chặn user root, chặn tag `:latest`, bắt buộc cấu hình CPU/memory limits,... được cấu hình áp dụng cho namespace `payments` bằng cách mở rộng danh sách `spec.match.namespaces` của các Constraint sẵn có trong thư mục `gatekeeper/constraints/` để bao gồm cả `payments`. Do đó, chúng ta kế thừa toàn bộ các Template logic cũ và chỉ cần cấu hình phạm vi áp dụng, giúp giữ nguyên mã nguồn luật cũ.
+
+### 2. Sự khác biệt giữa Role / RoleBinding và ClusterRole / ClusterRoleBinding trong việc giữ cô lập (isolation)?
+
+- **Role & RoleBinding (Namespace-scoped)**:
+  - **Role** định nghĩa các quyền (verbs trên các resources) giới hạn trong phạm vi một namespace cụ thể.
+  - **RoleBinding** liên kết Role đó với một User/ServiceAccount trong chính namespace đó.
+  - **Ý nghĩa cô lập**: User `payments-dev` được gán quyền thông qua Role và RoleBinding trong namespace `payments` sẽ **chỉ** có quyền thực thi thao tác trong phạm vi `payments`. Họ hoàn toàn không thể xem, sửa đổi hoặc can thiệp vào tài nguyên của namespace `demo` hay các namespace khác.
+- **ClusterRole & ClusterRoleBinding (Cluster-scoped)**:
+  - **ClusterRole** định nghĩa các quyền trên toàn bộ cụm Kubernetes (cho cả tài nguyên non-namespaced như Nodes, Namespaces và tài nguyên namespaced ở mọi namespace).
+  - **ClusterRoleBinding** áp dụng ClusterRole đó cho User/ServiceAccount trên **toàn cụm** (băng qua tất cả các namespace).
+  - **Nguy cơ bảo mật**: Nếu sử dụng `ClusterRoleBinding` cho `payments-dev`, họ sẽ có quyền truy cập sang namespace `demo` (hoặc các namespace hệ thống như `kube-system`, `argocd`), phá vỡ tính cô lập đa người dùng (multi-tenant isolation) của platform.
+
