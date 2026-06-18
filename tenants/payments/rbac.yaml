@@ -1,0 +1,33 @@
+# RBAC: least-privilege role and binding for payments-dev
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: payments-dev-role
+  namespace: payments
+rules:
+- apiGroups: ["", "apps", "networking.k8s.io"]
+  resources:
+  - pods
+  - pods/log
+  - pods/exec
+  - services
+  - deployments
+  - replicasets
+  - statefulsets
+  - daemonsets
+  - ingresses
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: payments-dev-rolebinding
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: payments-dev-role
+subjects:
+- kind: User
+  name: payments-dev
+  apiGroup: rbac.authorization.k8s.io

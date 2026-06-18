@@ -1,0 +1,12 @@
+# ResourceQuota: budget limits for payments namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: payments-quota
+  namespace: payments
+spec:
+  hard:
+    requests.cpu: "200m"
+    requests.memory: "128Mi"
+    limits.cpu: "500m"
+    limits.memory: "256Mi"

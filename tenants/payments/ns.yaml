@@ -1,0 +1,8 @@
+# Namespace: payments tenant namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    kubernetes.io/metadata.name: payments
+    policy.sigstore.dev/include: "true"

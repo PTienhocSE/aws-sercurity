@@ -13,5 +13,6 @@ spec:
         kinds: ["Rollout"]
     namespaces:
       - demo
+      - payments
   parameters:
     max: 5
