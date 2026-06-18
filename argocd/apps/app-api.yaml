@@ -9,7 +9,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/PTienhocSE/security-aws.git
+    repoURL: https://github.com/PTienhocSE/aws-sercurity.git
     path: app-api
     targetRevision: main
   destination:
