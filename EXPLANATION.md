@@ -1,4 +1,4 @@
-# HƯỚNG DẪN GIẢI THÍCH CHI TIẾT LAB 1 & LAB 2 (DÀNH CHO NGƯỜI MẤT GỐC)
+# HƯỚNG DẪN GIẢI THÍCH CHI TIẾT LAB 1 & LAB 2
 
 Tài liệu này giải thích chi tiết toàn bộ các phần của **Lab 1 (RBAC + Gatekeeper)** và **Lab 2 (Secrets + Supply Chain)**, bao gồm định nghĩa thuật ngữ, nhật ký lệnh, và phân tích code chi tiết từng dòng.
 
